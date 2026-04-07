@@ -1,3 +1,4 @@
 from sdk.middleware import AuditCaptureMiddleware
+from sdk.wrapper import AuditWrapper
 
-__all__ = ["AuditCaptureMiddleware"]
+__all__ = ["AuditWrapper", "AuditCaptureMiddleware"]
