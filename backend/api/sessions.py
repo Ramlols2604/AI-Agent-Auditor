@@ -59,3 +59,9 @@ async def create_session_event(
 
     _SESSION_EVENTS.setdefault(session_id, []).append(event)
     return event
+
+@router.get("/{session_id}/events", response_model=list[CapturedEventResponse])
+async def list_session_events(session_id: str) -> list[CapturedEventResponse]:
+    if session_id not in _SESSIONS:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return _SESSION_EVENTS.get(session_id, [])
