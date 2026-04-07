@@ -1,31 +1,24 @@
-# backend/models/event.py
 from datetime import datetime
+from typing import Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
-
-class CapturedEventCreateRequest(BaseModel):
-    sequence_num: int = Field(ge=0)
-    prompt: str
-    response: str
-    model: str = Field(min_length=1, max_length=120)
-    input_tokens: int = Field(default=0, ge=0)
-    output_tokens: int = Field(default=0, ge=0)
-    latency_ms: int = Field(default=0, ge=0)
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
-    raw_json: dict = Field(default_factory=dict)
+FlagType = Literal["hallucination", "safety", "cost", "compliance"]
+Severity = Literal["critical", "high", "medium", "low"]
 
 
-class CapturedEventResponse(BaseModel):
+class FlagResponse(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
+    event_id: str
     session_id: str
-    sequence_num: int
-    prompt: str
-    response: str
-    model: str
-    input_tokens: int
-    output_tokens: int
-    latency_ms: int
-    timestamp: datetime
-    raw_json: dict
+    flag_type: FlagType
+    severity: Severity
+    description: str = Field(min_length=1)
+    agent_verdict: dict = Field(default_factory=dict)
+    resolved: bool = False
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ResolveFlagRequest(BaseModel):
+    resolved: bool = True
