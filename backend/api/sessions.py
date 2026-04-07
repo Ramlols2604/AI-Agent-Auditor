@@ -69,5 +69,6 @@ async def list_session_events(session_id: str) -> list[CapturedEventResponse]:
 def session_exists(session_id: str) -> bool:
     return session_id in _SESSIONS
 
+
 def get_session_events(session_id: str) -> list[CapturedEventResponse]:
     return _SESSION_EVENTS.get(session_id, [])
