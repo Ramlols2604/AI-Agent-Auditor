@@ -7,6 +7,7 @@ from api.health import router as health_router
 from api.flags import router as flags_router
 from api.audit import router as audit_router
 from sdk.middleware import AuditCaptureMiddleware
+from services.repository import init_db
 
 app = FastAPI(
     title="AI Agent Auditor API",
@@ -31,3 +32,4 @@ app.add_middleware(
     AuditCaptureMiddleware,
     auditor_url="http://127.0.0.1:8000",
 )
+init_db()

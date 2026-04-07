@@ -1,15 +1,10 @@
-from typing import Dict
-
 from fastapi import APIRouter, HTTPException
 
 from models.event import CapturedEventCreateRequest, CapturedEventResponse
 from models.session import SessionCreateRequest, SessionResponse
+from services import repository
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
-
-# Temporary in-memory stores for this PR scope.
-_SESSIONS: Dict[str, SessionResponse] = {}
-_SESSION_EVENTS: Dict[str, list[CapturedEventResponse]] = {}
 
 
 @router.post("", response_model=SessionResponse)
@@ -18,22 +13,28 @@ async def create_session(payload: SessionCreateRequest) -> SessionResponse:
         agent_name=payload.agent_name,
         model_used=payload.model_used,
     )
-    _SESSIONS[session.id] = session
-    _SESSION_EVENTS[session.id] = []
-    return session
+    row = repository.create_session(
+        agent_name=session.agent_name,
+        model_used=session.model_used,
+        session_id=session.id,
+        started_at=session.started_at.isoformat(),
+        status=session.status,
+    )
+    return SessionResponse(**row)
 
 
 @router.get("", response_model=list[SessionResponse])
 async def list_sessions() -> list[SessionResponse]:
-    return list(_SESSIONS.values())
+    rows = repository.list_sessions()
+    return [SessionResponse(**r) for r in rows]
 
 
 @router.get("/{session_id}", response_model=SessionResponse)
 async def get_session(session_id: str) -> SessionResponse:
-    session = _SESSIONS.get(session_id)
-    if session is None:
+    row = repository.get_session(session_id)
+    if row is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    return session
+    return SessionResponse(**row)
 
 
 @router.post("/{session_id}/events", response_model=CapturedEventResponse)
@@ -41,7 +42,7 @@ async def create_session_event(
     session_id: str,
     payload: CapturedEventCreateRequest,
 ) -> CapturedEventResponse:
-    if session_id not in _SESSIONS:
+    if repository.get_session(session_id) is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
     event = CapturedEventResponse(
@@ -56,19 +57,22 @@ async def create_session_event(
         timestamp=payload.timestamp,
         raw_json=payload.raw_json,
     )
-
-    _SESSION_EVENTS.setdefault(session_id, []).append(event)
+    repository.create_event(event.model_dump())
     return event
+
 
 @router.get("/{session_id}/events", response_model=list[CapturedEventResponse])
 async def list_session_events(session_id: str) -> list[CapturedEventResponse]:
-    if session_id not in _SESSIONS:
+    if repository.get_session(session_id) is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    return _SESSION_EVENTS.get(session_id, [])
+    rows = repository.list_events_for_session(session_id)
+    return [CapturedEventResponse(**r) for r in rows]
+
 
 def session_exists(session_id: str) -> bool:
-    return session_id in _SESSIONS
+    return repository.get_session(session_id) is not None
 
 
 def get_session_events(session_id: str) -> list[CapturedEventResponse]:
-    return _SESSION_EVENTS.get(session_id, [])
+    rows = repository.list_events_for_session(session_id)
+    return [CapturedEventResponse(**r) for r in rows]
