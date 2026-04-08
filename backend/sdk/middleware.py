@@ -1,4 +1,5 @@
 import json
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -27,15 +28,40 @@ def _safe_post_json(auditor_url: str, path: str, payload: dict) -> dict | None:
 
 class AuditCaptureMiddleware(BaseHTTPMiddleware):
     """
-    Lightweight request-level capture middleware.
-    This is a stub: captures API request metadata and posts it as an event.
-    Never raises to caller if auditing fails.
+    Request-level capture middleware.
+    - Creates one middleware session lazily.
+    - Reuses same session for all requests.
+    - Emits incrementing sequence_num values.
+    - Never breaks main request flow.
     """
 
     def __init__(self, app: Any, auditor_url: str, session_id: str | None = None) -> None:
         super().__init__(app)
         self._auditor_url = auditor_url.rstrip("/")
         self._session_id = session_id
+        self._sequence = 0
+        self._lock = threading.Lock()
+
+    def _next_sequence(self) -> int:
+        with self._lock:
+            self._sequence += 1
+            return self._sequence
+
+    def _ensure_session(self) -> str | None:
+        if self._session_id:
+            return self._session_id
+
+        with self._lock:
+            if self._session_id:
+                return self._session_id
+
+            created = _safe_post_json(
+                self._auditor_url,
+                "/sessions",
+                {"agent_name": "middleware-capture", "model_used": "http-request"},
+            )
+            self._session_id = created.get("id") if created else None
+            return self._session_id
 
     async def dispatch(self, request: Request, call_next):
         started = time.perf_counter()
@@ -43,23 +69,13 @@ class AuditCaptureMiddleware(BaseHTTPMiddleware):
         latency_ms = int((time.perf_counter() - started) * 1000)
 
         try:
-            session_id = self._session_id
-            if not session_id:
-                # Create an internal session lazily if not provided.
-                created = _safe_post_json(
-                    self._auditor_url,
-                    "/sessions",
-                    {"agent_name": "middleware-capture", "model_used": "http-request"},
-                )
-                session_id = created.get("id") if created else None
-                self._session_id = session_id
-
+            session_id = self._ensure_session()
             if session_id:
                 _safe_post_json(
                     self._auditor_url,
                     f"/sessions/{session_id}/events",
                     {
-                        "sequence_num": 1,
+                        "sequence_num": self._next_sequence(),
                         "prompt": f"{request.method} {request.url.path}",
                         "response": f"status={response.status_code}",
                         "model": "http-middleware",
@@ -74,7 +90,6 @@ class AuditCaptureMiddleware(BaseHTTPMiddleware):
                     },
                 )
         except Exception:
-            # Must never break main request flow.
             pass
 
         return response
