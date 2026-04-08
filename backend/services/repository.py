@@ -104,3 +104,107 @@ def list_events_for_session(session_id: str) -> list[dict]:
         item["raw_json"] = json.loads(item["raw_json"]) if item["raw_json"] else {}
         out.append(item)
     return out
+
+import uuid
+from datetime import datetime, timezone
+
+def get_flag(flag_id: str) -> dict | None:
+    with _get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT id, event_id, session_id, flag_type, severity,
+                   description, agent_verdict, resolved, created_at
+            FROM flags
+            WHERE id = ?
+            """,
+            (flag_id,),
+        ).fetchone()
+    if not row:
+        return None
+    item = dict(row)
+    item["agent_verdict"] = json.loads(item["agent_verdict"]) if item["agent_verdict"] else {}
+    item["resolved"] = bool(item["resolved"])
+    return item
+
+
+def create_flag(
+    event_id: str,
+    session_id: str,
+    flag_type: str,
+    severity: str,
+    description: str,
+    agent_verdict: dict | None = None,
+) -> dict:
+    flag_id = str(uuid.uuid4())
+    created_at = datetime.now(timezone.utc).isoformat()
+    with _get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO flags (
+                id, event_id, session_id, flag_type, severity,
+                description, agent_verdict, resolved, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                flag_id,
+                event_id,
+                session_id,
+                flag_type,
+                severity,
+                description,
+                json.dumps(agent_verdict or {}),
+                0,
+                created_at,
+            ),
+        )
+    return get_flag(flag_id)
+
+
+def list_flags() -> list[dict]:
+    with _get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, event_id, session_id, flag_type, severity,
+                   description, agent_verdict, resolved, created_at
+            FROM flags
+            ORDER BY created_at DESC
+            """
+        ).fetchall()
+    out: list[dict] = []
+    for row in rows:
+        item = dict(row)
+        item["agent_verdict"] = json.loads(item["agent_verdict"]) if item["agent_verdict"] else {}
+        item["resolved"] = bool(item["resolved"])
+        out.append(item)
+    return out
+
+
+def list_flags_for_session(session_id: str) -> list[dict]:
+    with _get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, event_id, session_id, flag_type, severity,
+                   description, agent_verdict, resolved, created_at
+            FROM flags
+            WHERE session_id = ?
+            ORDER BY created_at DESC
+            """,
+            (session_id,),
+        ).fetchall()
+    out: list[dict] = []
+    for row in rows:
+        item = dict(row)
+        item["agent_verdict"] = json.loads(item["agent_verdict"]) if item["agent_verdict"] else {}
+        item["resolved"] = bool(item["resolved"])
+        out.append(item)
+    return out
+
+
+def resolve_flag(flag_id: str, resolved: bool) -> dict | None:
+    with _get_conn() as conn:
+        conn.execute(
+            "UPDATE flags SET resolved = ? WHERE id = ?",
+            (1 if resolved else 0, flag_id),
+        )
+    return get_flag(flag_id)
