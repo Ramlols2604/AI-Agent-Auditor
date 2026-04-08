@@ -16,7 +16,10 @@ def _safe_post_json(auditor_url: str, path: str, payload: dict) -> dict | None:
     req = urllib.request.Request(
         url=url,
         data=data,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "X-Audit-Internal": "1",
+        },
         method="POST",
     )
     try:
@@ -64,6 +67,9 @@ class AuditCaptureMiddleware(BaseHTTPMiddleware):
             return self._session_id
 
     async def dispatch(self, request: Request, call_next):
+        if request.headers.get("X-Audit-Internal") == "1":
+            return await call_next(request)
+            
         started = time.perf_counter()
         response = await call_next(request)
         latency_ms = int((time.perf_counter() - started) * 1000)
