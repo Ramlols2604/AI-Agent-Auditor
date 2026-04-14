@@ -24,9 +24,10 @@ async def _event_generator(session_id: str) -> AsyncGenerator[str, None]:
             payload = {
                 "type": "event_captured",
                 "session_id": session_id,
-                "event": event.model_dump(),
+                # Use JSON mode so datetime fields are serialized to strings.
+                "event": event.model_dump(mode="json"),
             }
-            yield f"data: {json.dumps(payload)}\n\n"
+            yield f"data: {json.dumps(payload, default=str)}\n\n"
             cursor += 1
 
         # Heartbeat keeps SSE alive.
