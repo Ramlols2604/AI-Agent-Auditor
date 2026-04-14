@@ -203,8 +203,10 @@ def list_flags_for_session(session_id: str) -> list[dict]:
 
 def resolve_flag(flag_id: str, resolved: bool) -> dict | None:
     with _get_conn() as conn:
-        conn.execute(
+        cursor = conn.execute(
             "UPDATE flags SET resolved = ? WHERE id = ?",
             (1 if resolved else 0, flag_id),
         )
+        if cursor.rowcount == 0:
+            return None
     return get_flag(flag_id)
