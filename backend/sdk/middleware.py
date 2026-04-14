@@ -1,32 +1,13 @@
-import json
 import threading
 import time
-import urllib.error
-import urllib.request
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
-
-def _safe_post_json(auditor_url: str, path: str, payload: dict) -> dict | None:
-    url = f"{auditor_url.rstrip('/')}{path}"
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url=url,
-        data=data,
-        headers={
-            "Content-Type": "application/json",
-            "X-Audit-Internal": "1",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError):
-        return None
+from services import repository
 
 
 class AuditCaptureMiddleware(BaseHTTPMiddleware):
@@ -38,9 +19,8 @@ class AuditCaptureMiddleware(BaseHTTPMiddleware):
     - Never breaks main request flow.
     """
 
-    def __init__(self, app: Any, auditor_url: str, session_id: str | None = None) -> None:
+    def __init__(self, app: Any, session_id: str | None = None) -> None:
         super().__init__(app)
-        self._auditor_url = auditor_url.rstrip("/")
         self._session_id = session_id
         self._sequence = 0
         self._lock = threading.Lock()
@@ -58,18 +38,17 @@ class AuditCaptureMiddleware(BaseHTTPMiddleware):
             if self._session_id:
                 return self._session_id
 
-            created = _safe_post_json(
-                self._auditor_url,
-                "/sessions",
-                {"agent_name": "middleware-capture", "model_used": "http-request"},
+            created = repository.create_session(
+                agent_name="middleware-capture",
+                model_used="http-request",
+                session_id=str(uuid.uuid4()),
+                started_at=datetime.now(timezone.utc).isoformat(),
+                status="active",
             )
             self._session_id = created.get("id") if created else None
             return self._session_id
 
     async def dispatch(self, request: Request, call_next):
-        if request.headers.get("X-Audit-Internal") == "1":
-            return await call_next(request)
-            
         started = time.perf_counter()
         response = await call_next(request)
         latency_ms = int((time.perf_counter() - started) * 1000)
@@ -77,10 +56,10 @@ class AuditCaptureMiddleware(BaseHTTPMiddleware):
         try:
             session_id = self._ensure_session()
             if session_id:
-                _safe_post_json(
-                    self._auditor_url,
-                    f"/sessions/{session_id}/events",
+                repository.create_event(
                     {
+                        "id": str(uuid.uuid4()),
+                        "session_id": session_id,
                         "sequence_num": self._next_sequence(),
                         "prompt": f"{request.method} {request.url.path}",
                         "response": f"status={response.status_code}",
@@ -93,7 +72,7 @@ class AuditCaptureMiddleware(BaseHTTPMiddleware):
                             "query": str(request.url.query),
                             "client": request.client.host if request.client else None,
                         },
-                    },
+                    }
                 )
         except Exception:
             pass

@@ -1,5 +1,6 @@
 import json
 import time
+import threading
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -39,6 +40,8 @@ class AuditWrapper:
             model_name=model_name,
         )
         self._session_id: str | None = self._create_session()
+        self._sequence_num = 0
+        self._sequence_lock = threading.Lock()
 
         # expose nested compatibility path: client.chat.completions.create(...)
         self.chat = SimpleNamespace(
@@ -133,6 +136,11 @@ class AuditWrapper:
             return
         _ = self._post_json(f"/sessions/{self._session_id}/events", event_payload)
 
+    def _next_sequence(self) -> int:
+        with self._sequence_lock:
+            self._sequence_num += 1
+            return self._sequence_num
+
     def _create_completion(self, *args: Any, **kwargs: Any) -> Any:
         start = time.perf_counter()
 
@@ -145,7 +153,7 @@ class AuditWrapper:
         input_tokens, output_tokens = self._extract_tokens(response)
 
         event_payload = {
-            "sequence_num": 1,  # MVP: static until per-session counter added
+            "sequence_num": self._next_sequence(),
             "prompt": prompt_text,
             "response": response_text,
             "model": kwargs.get("model", self._cfg.model_name),
