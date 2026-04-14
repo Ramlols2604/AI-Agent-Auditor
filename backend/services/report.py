@@ -9,6 +9,7 @@ def build_report_payload(session_id: str) -> dict:
         return {
             "session_id": session_id,
             "generated_at": datetime.now(timezone.utc).isoformat(),
+            "format": "json-summary",
             "status": "not_found",
             "summary": {
                 "verdict": "UNKNOWN",
@@ -36,7 +37,7 @@ def build_report_payload(session_id: str) -> dict:
     return {
         "session_id": session_id,
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "format": "pdf-placeholder",
+        "format": "json-summary",
         "status": "ready",
         "summary": {
             "verdict": verdict,

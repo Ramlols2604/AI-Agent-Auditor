@@ -30,6 +30,5 @@ app.include_router(audit_router)
 
 app.add_middleware(
     AuditCaptureMiddleware,
-    auditor_url="http://127.0.0.1:8000",
 )
 init_db()
