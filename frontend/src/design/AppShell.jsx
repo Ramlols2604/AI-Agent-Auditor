@@ -1,9 +1,8 @@
 import { NavLink, useLocation } from 'react-router-dom'
-import { formatCost } from '../utils/sessionDisplay.js'
 import { Icon } from './icons.jsx'
 
 const NAV = [
-  { id: 'sessions', to: '/', label: 'Sessions', icon: 'sessions', end: true },
+  { id: 'sessions', to: '/sessions', label: 'Sessions', icon: 'sessions', end: true },
   { id: 'live', to: '/live', label: 'Live Audit', icon: 'live' },
   { id: 'flags', to: '/flags', label: 'Flags', icon: 'flags' },
   { id: 'reports', to: '/audit', label: 'Reports', icon: 'reports' },
@@ -12,7 +11,9 @@ const NAV = [
 ]
 
 function routeActive(pathname, item) {
-  if (item.id === 'sessions') return pathname === '/' || pathname === '/sessions' || pathname.startsWith('/sessions/') || pathname === '/session'
+  if (item.id === 'sessions') {
+    return pathname === '/' || pathname === '/sessions' || pathname.startsWith('/sessions/')
+  }
   return pathname.startsWith(item.to)
 }
 
@@ -295,39 +296,6 @@ export function Btn({ kind = 'ghost', icon, children, style, onClick, disabled, 
   )
 }
 
-export function RiskCell({ risk }) {
-  const value = Number(risk) || 0
-  let tone = 'low'
-  if (value > 85) tone = 'critical'
-  else if (value > 60) tone = 'high'
-  else if (value > 30) tone = 'medium'
-  const color = {
-    low: 'var(--success)',
-    medium: 'var(--warning)',
-    high: 'var(--danger)',
-    critical: 'var(--critical)',
-  }[tone]
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 96 }}>
-      <div style={{ width: 54, height: 4, background: 'rgba(255,255,255,0.05)', borderRadius: 2, overflow: 'hidden' }}>
-        <div className="aaa-bar-fill" style={{ width: `${Math.min(100, value)}%`, height: '100%', background: color }} />
-      </div>
-      <span className="aaa-mono" style={{ fontSize: 11, color, width: 22, textAlign: 'right' }}>
-        {value}
-      </span>
-    </div>
-  )
-}
-
-export function CostCell({ cost }) {
-  const value = Number(cost) || 0
-  const color = value > 0.01 ? '#f59e0b' : '#10b981'
-  return (
-    <span className="aaa-mono" style={{ fontSize: 12, color, fontVariantNumeric: 'tabular-nums' }}>
-      {formatCost(value)}
-    </span>
-  )
-}
 
 export function FilterTabs({ tabs, value, onChange, counts }) {
   return (

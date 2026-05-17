@@ -3,7 +3,7 @@ import { AppFrame } from '../design/AppShell.jsx'
 
 function crumbsForPath(pathname) {
   if (pathname.startsWith('/sessions/') && pathname !== '/sessions') return ['Production', 'Sessions', 'Detail']
-  if (pathname === '/' || pathname === '/sessions' || pathname === '/session') return ['Production', 'Sessions']
+  if (pathname === '/' || pathname === '/sessions') return ['Production', 'Sessions']
   if (pathname.startsWith('/live')) return ['Production', 'Live Audit']
   if (pathname.startsWith('/flags')) return ['Production', 'Flags']
   if (pathname.startsWith('/audit')) return ['Production', 'Reports']

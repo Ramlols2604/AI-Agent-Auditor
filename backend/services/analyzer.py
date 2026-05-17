@@ -1,7 +1,6 @@
 from services import repository
 from datetime import datetime, timezone
-from services.costs import TOKEN_COSTS as SHARED_TOKEN_COSTS
-from services.costs import calculate_cost as shared_calculate_cost
+from services.costs import calculate_cost
 from services.flag_builder import (
     DEFAULT_RESOLUTION_STEPS,
     EU_ARTICLES,
@@ -11,7 +10,6 @@ from services.flag_builder import (
 )
 import logging
 
-TOKEN_COSTS = SHARED_TOKEN_COSTS
 logger = logging.getLogger(__name__)
 
 THRESHOLDS = {
@@ -20,10 +18,6 @@ THRESHOLDS = {
     "cost": 60,
     "compliance": 75,
 }
-
-
-def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
-    return shared_calculate_cost(model, input_tokens, output_tokens)
 
 
 async def build_evidence_packet(session_id: str, db=repository) -> dict:

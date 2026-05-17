@@ -23,10 +23,6 @@ export function formatCost(cost) {
   if (n < 1) return `$${n.toFixed(3)}`
   return `$${n.toFixed(2)}`
 }
-
-/** @deprecated Use formatCost */
-export const formatCostUsd = formatCost
-
 export function timeAgo(dateStr) {
   const diff = Date.now() - new Date(dateStr).getTime()
   if (diff < 0 || Number.isNaN(diff)) return 'just now'

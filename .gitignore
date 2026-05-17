@@ -206,3 +206,11 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 backend/db/local.db
+backend/db/local.db.*
+backend/db/*.recovered.db
+
+# Local dev artifacts
+HaluEval/
+ui-redesign-import/
+*.zip
+frontend/dist/

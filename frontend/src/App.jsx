@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { getAuditReport } from './api/audit'
-import { apiFetch, getApiBase, RateLimitError } from './api/client'
+import { apiFetch, RateLimitError } from './api/client'
 import { listFlags, resolveFlag } from './api/flags'
-import { getSession, listSessionEvents, listSessions } from './api/sessions'
+import { listSessionEvents, listSessions } from './api/sessions'
 import Layout from './components/Layout'
+import { SessionAuditPanel } from './components/SessionAuditPanel'
 import About from './About'
 import AuditPage from './pages/AuditPage'
 import FlagsPage from './pages/FlagsPage'
-import SessionDetailPage, { SessionAuditPanel } from './pages/SessionDetailPage'
 import SessionDetailRoute from './pages/SessionDetailRoute'
 import SessionsPage from './pages/SessionsPage'
 import OnboardingWizard, { isOnboardingComplete } from './pages/OnboardingWizard'
@@ -59,10 +59,6 @@ function App() {
   const [sessionsError, setSessionsError] = useState('')
 
   const [selectedSessionId, setSelectedSessionId] = useState('')
-  const [sessionDetail, setSessionDetail] = useState(null)
-  const [events, setEvents] = useState([])
-  const [detailLoading, setDetailLoading] = useState(false)
-  const [detailError, setDetailError] = useState('')
 
   const [allFlags, setAllFlags] = useState([])
   const [flagsLoading, setFlagsLoading] = useState(false)
@@ -88,21 +84,18 @@ function App() {
   const pollIntervalMsRef = useRef(POLL_INTERVAL_MS)
   const sessionsRef = useRef([])
   const rateLimitUntilRef = useRef(0)
-  const detailFallbackRef = useRef(null)
   const prevFlagIdsRef = useRef(new Set())
   const toastIdRef = useRef(0)
 
   const [toasts, setToasts] = useState([])
   const [showOnboarding, setShowOnboarding] = useState(() => !isOnboardingComplete())
 
-  const apiBase = useMemo(() => getApiBase(), [])
-
   const detailSessionId = useMemo(() => {
     const match = location.pathname.match(/^\/sessions\/([^/]+)/)
-    if (match?.[1]) return match[1]
-    if (location.pathname === '/session') return selectedSessionId
-    return ''
-  }, [location.pathname, selectedSessionId])
+    return match?.[1] || ''
+  }, [location.pathname])
+
+  const activeSessionId = detailSessionId || selectedSessionId
 
   const pushToast = useCallback(({ title, message, tone = 'info' }) => {
     const id = `toast-${++toastIdRef.current}`
@@ -131,28 +124,6 @@ function App() {
     [allFlags],
   )
 
-  const loadSessionDetails = useCallback(async (sessionId) => {
-    if (!sessionId) return
-    setDetailLoading(true)
-    setDetailError('')
-    try {
-      await deduplicatedFetch(`session-detail-${sessionId}`, async () => {
-        const [session, sessionEvents] = await Promise.all([getSession(sessionId), listSessionEvents(sessionId)])
-        if (!isMountedRef.current) return
-        setSessionDetail(session)
-        setEvents(sessionEvents)
-        setEventCountBySession((prev) => ({ ...prev, [sessionId]: sessionEvents.length }))
-      })
-    } catch (error) {
-      if (!isMountedRef.current) return
-      setDetailError(error.message)
-      setSessionDetail(null)
-      setEvents([])
-    } finally {
-      if (isMountedRef.current) setDetailLoading(false)
-    }
-  }, [])
-
   const loadSessions = useCallback(async () => {
     setSessionsLoading(true)
     setSessionsError('')
@@ -162,8 +133,6 @@ function App() {
 
       if (data.length === 0) {
         setSelectedSessionId('')
-        setSessionDetail(null)
-        setEvents([])
         setEventCountBySession({})
         setEventsTodayBySession({})
         setLastEventAtBySession({})
@@ -299,15 +268,12 @@ function App() {
   }, [navigate, pushToast])
 
   const handleGenerateAudit = useCallback(() => {
-    if (!selectedSessionId || auditState.status === 'running') return
-    const session = sessions.find((s) => s.id === selectedSessionId)
+    const sessionId = activeSessionId
+    if (!sessionId || auditState.status === 'running') return
+    const session = sessions.find((s) => s.id === sessionId)
     setAuditActionState({ loading: true, error: '', message: '' })
-    runLiveAudit(
-      selectedSessionId,
-      session?.agent_name,
-      eventCountBySession[selectedSessionId] || 0,
-    )
-  }, [auditState.status, eventCountBySession, runLiveAudit, selectedSessionId, sessions])
+    runLiveAudit(sessionId, session?.agent_name, eventCountBySession[sessionId] || 0)
+  }, [activeSessionId, auditState.status, eventCountBySession, runLiveAudit, sessions])
 
   useEffect(() => {
     if (auditState.status !== 'complete' && auditState.status !== 'error') return
@@ -333,10 +299,10 @@ function App() {
         error: '',
         message: `Verdict: ${auditState.verdict} | Audit complete`,
       })
-      loadSessionDetails(selectedSessionId)
       loadFlagsData()
+      loadSessions()
       if (auditState.verdict === 'CRITICAL' || auditState.verdict === 'FLAGGED') {
-        const session = sessions.find((s) => s.id === selectedSessionId)
+        const session = sessionsRef.current.find((s) => s.id === auditState.sessionId)
         pushToast({
           title: `Audit ${auditState.verdict}`,
           message: `${session?.agent_name || 'Session'} scored ${auditState.overallScore ?? '—'}/100`,
@@ -360,23 +326,21 @@ function App() {
     auditState.flagsRaised,
     auditState.error,
     loadFlagsData,
-    loadSessionDetails,
-    selectedSessionId,
-    sessions,
+    loadSessions,
     pushToast,
   ])
 
   const handleFetchReport = useCallback(async () => {
-    if (!selectedSessionId) return
+    if (!activeSessionId) return
     setReportState({ loading: true, error: '', message: '' })
     try {
-      const data = await getAuditReport(selectedSessionId)
+      const data = await getAuditReport(activeSessionId)
       setReport(data)
       setReportState({ loading: false, error: '', message: 'Report loaded.' })
     } catch (error) {
       setReportState({ loading: false, error: error.message, message: '' })
     }
-  }, [selectedSessionId])
+  }, [activeSessionId])
 
   const handleResolveFlag = useCallback(
     async (flagId) => {
@@ -454,14 +418,13 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (selectedSessionId) {
-      loadSessionDetails(selectedSessionId)
+    if (activeSessionId) {
       setReport(null)
       setAuditActionState(initialActionState)
       setReportState(initialActionState)
       setResolveState(initialActionState)
     }
-  }, [loadSessionDetails, selectedSessionId])
+  }, [activeSessionId])
 
   useEffect(() => {
     const check = async () => {
@@ -494,74 +457,15 @@ function App() {
     }
   }, [location.pathname, selectedSessionId])
 
-  useEffect(() => {
-    if (!detailSessionId) return undefined
-    const onDetailPage =
-      location.pathname === '/session' || location.pathname.startsWith('/sessions/')
-    if (!onDetailPage) return undefined
-
-    loadSessionDetails(detailSessionId)
-
-    let source
-    let cancelled = false
-    try {
-      source = new EventSource(`${apiBase}/stream/${detailSessionId}`)
-      source.onmessage = (event) => {
-        if (cancelled || !isMountedRef.current) return
-        try {
-          const payload = JSON.parse(event.data)
-          if (payload?.type !== 'event_captured' || !payload?.event) return
-          const newEvent = payload.event
-          setEvents((prev) => {
-            if (prev.some((item) => item.id === newEvent.id)) return prev
-            const next = [...prev, newEvent]
-            setEventCountBySession((counts) => ({ ...counts, [detailSessionId]: next.length }))
-            return next
-          })
-        } catch {
-          // Ignore malformed stream events.
-        }
-      }
-      source.onerror = () => {
-        source?.close()
-        if (detailFallbackRef.current) clearInterval(detailFallbackRef.current)
-        detailFallbackRef.current = setInterval(() => {
-          if (!isMountedRef.current) return
-          if (Date.now() < rateLimitUntilRef.current) return
-          loadSessionDetails(detailSessionId)
-          loadFlagsData()
-        }, 30000)
-      }
-    } catch {
-      if (detailFallbackRef.current) clearInterval(detailFallbackRef.current)
-      detailFallbackRef.current = setInterval(() => {
-        if (!isMountedRef.current) return
-        if (Date.now() < rateLimitUntilRef.current) return
-        loadSessionDetails(detailSessionId)
-        loadFlagsData()
-      }, 30000)
-    }
-
-    return () => {
-      cancelled = true
-      if (detailFallbackRef.current) {
-        clearInterval(detailFallbackRef.current)
-        detailFallbackRef.current = null
-      }
-      if (source) source.close()
-    }
-  }, [apiBase, detailSessionId, loadFlagsData, loadSessionDetails, location.pathname])
-
   const showRightPanel =
-    location.pathname === '/session' ||
-    (location.pathname.startsWith('/sessions/') && location.pathname !== '/sessions')
+    location.pathname.startsWith('/sessions/') && location.pathname !== '/sessions'
 
   return (
     <Layout
       showRightPanel={showRightPanel}
       rightPanel={
         <SessionAuditPanel
-          selectedSessionId={detailSessionId || selectedSessionId}
+          selectedSessionId={activeSessionId}
           latestAuditResult={latestAuditResult}
           onGenerateAudit={handleGenerateAudit}
         />
@@ -599,37 +503,7 @@ function App() {
             />
           }
         />
-        <Route
-          path="/"
-          element={
-            <SessionsPage
-              sessions={sessions}
-              sessionsLoading={sessionsLoading}
-              sessionsError={sessionsError}
-              allFlags={allFlags}
-              selectedSessionId={selectedSessionId}
-              eventCountBySession={eventCountBySession}
-              eventsTodayBySession={eventsTodayBySession}
-              lastEventAtBySession={lastEventAtBySession}
-              flagCountBySession={flagCountBySession}
-              onRefresh={loadSessions}
-              onSelectSession={setSelectedSessionId}
-            />
-          }
-        />
-        <Route
-          path="/session"
-          element={
-            <SessionDetailPage
-              selectedSessionId={selectedSessionId}
-              sessionDetail={sessionDetail}
-              events={events}
-              detailLoading={detailLoading}
-              detailError={detailError}
-              flagCount={flagCountBySession[selectedSessionId] || 0}
-            />
-          }
-        />
+        <Route path="/" element={<Navigate to="/sessions" replace />} />
         <Route
           path="/live"
           element={
@@ -657,7 +531,7 @@ function App() {
           path="/audit"
           element={
             <AuditPage
-              selectedSessionId={selectedSessionId}
+              selectedSessionId={activeSessionId}
               sessions={sessions}
               allFlags={allFlags}
               auditActionState={auditActionState}
