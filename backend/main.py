@@ -1,6 +1,7 @@
 # backend/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from middleware.rate_limit import RateLimitMiddleware
 from api.sessions import router as sessions_router
 from api.stream import router as stream_router
 from api.health import router as health_router
@@ -10,7 +11,7 @@ from sdk.middleware import AuditCaptureMiddleware
 from services.repository import init_db
 
 app = FastAPI(
-    title="AI Agent Auditor API",
+    title="Sentinel API",
     version="0.1.0",
 )
 
@@ -21,6 +22,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(RateLimitMiddleware)
 
 app.include_router(health_router)
 app.include_router(sessions_router)

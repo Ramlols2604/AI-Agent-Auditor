@@ -27,18 +27,37 @@ def build_report_payload(session_id: str) -> dict:
     flags_resolved = sum(1 for flag in flags if flag.get("resolved"))
     overall_score = session.get("compliance_score")
 
+    agent_scores: dict[str, int | None] = {
+        "hallucination": None,
+        "safety": None,
+        "cost": None,
+        "compliance": None,
+    }
+    for flag in flags:
+        verdict_payload = flag.get("agent_verdict") or {}
+        agent_type = str(verdict_payload.get("agent_type") or flag.get("flag_type") or "")
+        if agent_type in agent_scores and verdict_payload.get("score") is not None:
+            agent_scores[agent_type] = int(verdict_payload["score"])
+
     if flags_total == 0:
         verdict = "SAFE"
     elif flags_resolved == flags_total:
         verdict = "RESOLVED"
     else:
         verdict = "FLAGGED"
+        unresolved = [f for f in flags if not f.get("resolved")]
+        if any(str(f.get("severity", "")).lower() == "critical" for f in unresolved):
+            verdict = "CRITICAL"
 
     return {
         "session_id": session_id,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "format": "json-summary",
         "status": "ready",
+        "session": {
+            "agent_name": session.get("agent_name"),
+            "model_used": session.get("model_used"),
+        },
         "summary": {
             "verdict": verdict,
             "overall_score": overall_score,
@@ -46,4 +65,16 @@ def build_report_payload(session_id: str) -> dict:
             "flags_resolved": flags_resolved,
             "events_total": len(events),
         },
+        "agent_scores": agent_scores,
+        "flags": [
+            {
+                "id": f.get("id"),
+                "flag_type": f.get("flag_type"),
+                "severity": f.get("severity"),
+                "description": f.get("description"),
+                "resolved": bool(f.get("resolved")),
+                "agent_verdict": f.get("agent_verdict") or {},
+            }
+            for f in flags
+        ],
     }

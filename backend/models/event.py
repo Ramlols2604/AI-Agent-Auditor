@@ -26,6 +26,7 @@ class CapturedEventResponse(BaseModel):
     model: str
     input_tokens: int
     output_tokens: int
+    cost_usd: float = Field(default=0.0, ge=0.0)
     latency_ms: int
     timestamp: datetime
     raw_json: dict

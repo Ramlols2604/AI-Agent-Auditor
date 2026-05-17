@@ -1,0 +1,146 @@
+/* Sentinel — Design tokens
+ * Single source of truth. Inline styles in screens reference these via var(--*).
+ */
+
+:root {
+  /* —— Surfaces —— */
+  --bg:           #0a0b0d;
+  --bg-soft:      #0e1014;
+  --surface:      #111318;
+  --surface-2:    #161922;
+  --surface-3:    #1c2030;
+  --elev-1:       #181b24;
+  --border:       rgba(255,255,255,0.06);
+  --border-strong:rgba(255,255,255,0.10);
+  --border-focus: rgba(99,102,241,0.55);
+
+  /* —— Text —— */
+  --text:         #f1f5f9;
+  --text-soft:    #cbd5e1;
+  --muted:        #64748b;
+  --muted-2:      #475569;
+
+  /* —— Brand —— */
+  --primary:      #6366f1;
+  --primary-soft: rgba(99,102,241,0.14);
+  --primary-line: rgba(99,102,241,0.35);
+
+  /* —— Semantic —— */
+  --success:      #10b981;
+  --success-soft: rgba(16,185,129,0.12);
+  --success-line: rgba(16,185,129,0.30);
+  --warning:      #f59e0b;
+  --warning-soft: rgba(245,158,11,0.12);
+  --warning-line: rgba(245,158,11,0.30);
+  --danger:       #ef4444;
+  --danger-soft:  rgba(239,68,68,0.12);
+  --danger-line:  rgba(239,68,68,0.30);
+  --critical:     #f43f5e;
+  --critical-soft:rgba(244,63,94,0.14);
+
+  /* —— Type —— */
+  --font-ui:    'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono:  'JetBrains Mono', 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* Type scale */
+  --t-xs:   11px;
+  --t-sm:   12px;
+  --t-base: 13px;
+  --t-md:   14px;
+  --t-lg:   16px;
+  --t-xl:   20px;
+  --t-2xl:  28px;
+  --t-3xl:  40px;
+  --t-display: 56px;
+
+  /* —— Spacing (8px grid w/ 4px half-steps) —— */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-7: 32px;
+  --s-8: 40px;
+  --s-9: 56px;
+
+  /* —— Radius —— */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+
+  /* —— Shadows —— */
+  --shadow-1: 0 1px 0 rgba(255,255,255,0.03) inset, 0 1px 2px rgba(0,0,0,0.5);
+  --shadow-2: 0 8px 24px rgba(0,0,0,0.40), 0 0 0 1px rgba(255,255,255,0.04) inset;
+  --shadow-pop: 0 12px 36px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.06);
+}
+
+/* —— Base reset within app surfaces —— */
+.aaa-root {
+  font-family: var(--font-ui);
+  font-size: var(--t-base);
+  line-height: 1.45;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: 'ss01','cv11';
+}
+.aaa-root *, .aaa-root *::before, .aaa-root *::after { box-sizing: border-box; }
+.aaa-root button { font-family: inherit; }
+.aaa-mono { font-family: var(--font-mono); font-feature-settings: 'tnum','zero'; }
+
+/* —— Reusable bits —— */
+.aaa-label-tiny {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.aaa-divider { height: 1px; background: var(--border); border: 0; }
+
+.aaa-pulse-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  display: inline-block; position: relative;
+}
+.aaa-pulse-dot::after {
+  content:''; position:absolute; inset:-4px; border-radius:50%;
+  background: currentColor; opacity:.25;
+  animation: aaa-pulse 1.6s ease-out infinite;
+}
+@keyframes aaa-pulse {
+  0%   { transform: scale(0.6); opacity:.35; }
+  80%  { transform: scale(1.6); opacity:0; }
+  100% { transform: scale(1.6); opacity:0; }
+}
+
+.aaa-shimmer {
+  background: linear-gradient(90deg,
+    rgba(255,255,255,0.02) 0%,
+    rgba(255,255,255,0.06) 50%,
+    rgba(255,255,255,0.02) 100%);
+  background-size: 200% 100%;
+  animation: aaa-shimmer 1.6s linear infinite;
+}
+@keyframes aaa-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+.aaa-fade-in { animation: aaa-fade 240ms ease-out both; }
+@keyframes aaa-fade { from { opacity:0; transform: translateY(2px);} to { opacity:1; transform:none;} }
+
+.aaa-bar-fill { transform-origin: left; animation: aaa-fill 600ms cubic-bezier(.2,.7,.2,1) both; }
+@keyframes aaa-fill { from { transform: scaleX(0);} to { transform: scaleX(1);} }
+
+.aaa-row:hover { background: rgba(255,255,255,0.025) !important; }
+
+.aaa-focus:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.aaa-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+.aaa-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 6px; }
+.aaa-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.10); }
+.aaa-scroll::-webkit-scrollbar-track { background: transparent; }

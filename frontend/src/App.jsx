@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
-import { generateAudit, getAuditReport } from './api/audit'
-import { apiFetch, getApiBase } from './api/client'
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { getAuditReport } from './api/audit'
+import { apiFetch, getApiBase, RateLimitError } from './api/client'
 import { listFlags, resolveFlag } from './api/flags'
 import { getSession, listSessionEvents, listSessions } from './api/sessions'
 import Layout from './components/Layout'
@@ -9,11 +9,19 @@ import About from './About'
 import AuditPage from './pages/AuditPage'
 import FlagsPage from './pages/FlagsPage'
 import SessionDetailPage, { SessionAuditPanel } from './pages/SessionDetailPage'
+import SessionDetailRoute from './pages/SessionDetailRoute'
 import SessionsPage from './pages/SessionsPage'
+import OnboardingWizard, { isOnboardingComplete } from './pages/OnboardingWizard'
+import ToastStack from './components/ToastStack'
 import LiveAudit from './LiveAudit'
+import Settings from './Settings'
+import { useAuditRunner } from './hooks/useAuditRunner'
+import { DATA_CLEARED_EVENT } from './utils/dataEvents'
+import { showBrowserNotification } from './utils/notifications'
 
 const initialActionState = { loading: false, error: '', message: '' }
-const MAX_EVENT_PROBE_SESSIONS = 40
+const POLL_INTERVAL_MS = 30000
+const EVENT_PROBE_MAX = 3
 const activeRequests = new Set()
 
 async function deduplicatedFetch(key, fetchFn) {
@@ -44,6 +52,7 @@ const initialLiveAuditState = {
 
 function App() {
   const location = useLocation()
+  const navigate = useNavigate()
 
   const [sessions, setSessions] = useState([])
   const [sessionsLoading, setSessionsLoading] = useState(false)
@@ -73,11 +82,41 @@ function App() {
   const [flagCountBySession, setFlagCountBySession] = useState({})
   const [isConnected, setIsConnected] = useState(true)
   const isMountedRef = useRef(true)
+  const lastAuditSyncRef = useRef('')
   const refreshPollingRef = useRef(null)
   const healthPollingRef = useRef(null)
+  const pollIntervalMsRef = useRef(POLL_INTERVAL_MS)
+  const sessionsRef = useRef([])
+  const rateLimitUntilRef = useRef(0)
   const detailFallbackRef = useRef(null)
+  const prevFlagIdsRef = useRef(new Set())
+  const toastIdRef = useRef(0)
+
+  const [toasts, setToasts] = useState([])
+  const [showOnboarding, setShowOnboarding] = useState(() => !isOnboardingComplete())
 
   const apiBase = useMemo(() => getApiBase(), [])
+
+  const detailSessionId = useMemo(() => {
+    const match = location.pathname.match(/^\/sessions\/([^/]+)/)
+    if (match?.[1]) return match[1]
+    if (location.pathname === '/session') return selectedSessionId
+    return ''
+  }, [location.pathname, selectedSessionId])
+
+  const pushToast = useCallback(({ title, message, tone = 'info' }) => {
+    const id = `toast-${++toastIdRef.current}`
+    setToasts((prev) => [...prev, { id, title, message, tone }].slice(-4))
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id))
+    }, 6000)
+  }, [])
+
+  const { runAudit: runLiveAudit } = useAuditRunner({
+    auditState,
+    setAuditState,
+    setAuditEventSource,
+  })
 
   const hasActiveSession = useMemo(() => {
     const now = Date.now()
@@ -87,7 +126,10 @@ function App() {
     })
   }, [lastEventAtBySession])
 
-  const totalFlagCount = useMemo(() => allFlags.filter((f) => !f.resolved).length, [allFlags])
+  const totalFlagCount = useMemo(
+    () => allFlags.filter((f) => f.resolved === false || f.resolved === 0 || !f.resolved).length,
+    [allFlags],
+  )
 
   const loadSessionDetails = useCallback(async (sessionId) => {
     if (!sessionId) return
@@ -117,51 +159,92 @@ function App() {
     try {
       const data = await listSessions()
       setSessions(data)
-      if (!selectedSessionId && data.length > 0) {
-        setSelectedSessionId(data[0].id)
+
+      if (data.length === 0) {
+        setSelectedSessionId('')
+        setSessionDetail(null)
+        setEvents([])
+        setEventCountBySession({})
+        setEventsTodayBySession({})
+        setLastEventAtBySession({})
+        return
       }
 
-      const probeIds = []
-      if (selectedSessionId) {
-        probeIds.push(selectedSessionId)
+      const activeId =
+        selectedSessionId && data.some((s) => s.id === selectedSessionId)
+          ? selectedSessionId
+          : data[0].id
+      if (activeId !== selectedSessionId) {
+        setSelectedSessionId(activeId)
       }
-      data.forEach((session) => {
-        if (probeIds.length < MAX_EVENT_PROBE_SESSIONS && !probeIds.includes(session.id)) {
-          probeIds.push(session.id)
-        }
-      })
 
-      const counts = await Promise.all(
-        probeIds.map(async (id) => {
-          try {
-            let ev = []
-            await deduplicatedFetch(`session-events-${id}`, async () => {
-              ev = await listSessionEvents(id)
-            })
-            const now = Date.now()
-            const todayCount = ev.filter((event) => {
-              const ts = new Date(event.timestamp).getTime()
-              return Number.isFinite(ts) && now - ts <= 24 * 60 * 60 * 1000
-            }).length
-            const lastEventAt = ev.length > 0 ? ev[ev.length - 1].timestamp : null
-            return [id, { count: ev.length, todayCount, lastEventAt }]
-          } catch {
-            return [id, { count: 0, todayCount: 0, lastEventAt: null }]
-          }
-        }),
-      )
-      const asObject = Object.fromEntries(counts)
+      sessionsRef.current = data
+
+      const now = Date.now()
       setEventCountBySession(
-        Object.fromEntries(Object.entries(asObject).map(([id, v]) => [id, v.count])),
+        Object.fromEntries(
+          data.map((session) => [session.id, Number(session.event_count ?? 0)]),
+        ),
       )
       setEventsTodayBySession(
-        Object.fromEntries(Object.entries(asObject).map(([id, v]) => [id, v.todayCount])),
+        Object.fromEntries(
+          data.map((session) => {
+            const started = new Date(session.started_at || '').getTime()
+            const isToday = Number.isFinite(started) && now - started <= 24 * 60 * 60 * 1000
+            return [session.id, isToday ? Number(session.event_count ?? 0) : 0]
+          }),
+        ),
       )
       setLastEventAtBySession(
-        Object.fromEntries(Object.entries(asObject).map(([id, v]) => [id, v.lastEventAt])),
+        Object.fromEntries(
+          data.map((session) => [session.id, session.started_at || null]),
+        ),
       )
+
+      const probeIds = []
+      if (activeId) probeIds.push(activeId)
+      data
+        .filter((s) => String(s.status || '').toLowerCase() === 'active')
+        .slice(0, EVENT_PROBE_MAX)
+        .forEach((s) => {
+          if (!probeIds.includes(s.id)) probeIds.push(s.id)
+        })
+
+      if (probeIds.length > 0) {
+        const counts = await Promise.all(
+          probeIds.map(async (id) => {
+            try {
+              let ev = []
+              await deduplicatedFetch(`session-events-${id}`, async () => {
+                ev = await listSessionEvents(id)
+              })
+              const todayCount = ev.filter((event) => {
+                const ts = new Date(event.timestamp).getTime()
+                return Number.isFinite(ts) && now - ts <= 24 * 60 * 60 * 1000
+              }).length
+              const lastEventAt = ev.length > 0 ? ev[ev.length - 1].timestamp : null
+              return [id, { count: ev.length, todayCount, lastEventAt }]
+            } catch {
+              return [id, null]
+            }
+          }),
+        )
+        counts.forEach(([id, v]) => {
+          if (!v) return
+          setEventCountBySession((prev) => ({ ...prev, [id]: v.count }))
+          setEventsTodayBySession((prev) => ({ ...prev, [id]: v.todayCount }))
+          setLastEventAtBySession((prev) => ({ ...prev, [id]: v.lastEventAt }))
+        })
+      }
     } catch (error) {
-      setSessionsError(error.message)
+      if (error instanceof RateLimitError) {
+        rateLimitUntilRef.current = Date.now() + error.retryAfter * 1000
+        pollIntervalMsRef.current = Math.max(pollIntervalMsRef.current, error.retryAfter * 1000)
+        rateLimitUntilRef.current = Date.now() + error.retryAfter * 1000
+        setSessionsError(`Rate limited (${error.limitType || 'refresh'}). Retrying in ${error.retryAfter}s.`)
+      } else {
+        setSessionsError(error.message)
+      }
     } finally {
       setSessionsLoading(false)
     }
@@ -179,29 +262,109 @@ function App() {
         bySession[flag.session_id] = (bySession[flag.session_id] || 0) + (flag.resolved ? 0 : 1)
       })
       setFlagCountBySession(bySession)
+
+      const openFlags = all.filter((f) => f.resolved === false || f.resolved === 0 || !f.resolved)
+      const prevIds = prevFlagIdsRef.current
+      const newCritical = openFlags.filter(
+        (f) => !prevIds.has(f.id) && String(f.severity).toLowerCase() === 'critical',
+      )
+      if (newCritical.length > 0) {
+        const flag = newCritical[0]
+        const session = sessionsRef.current.find((s) => s.id === flag.session_id)
+        const agentLabel = session?.agent_name || flag.session_id?.slice(0, 8) || 'session'
+        pushToast({
+          title: `⚑ Critical flag on ${agentLabel}`,
+          message: flag.description || `${flag.flag_type} agent flagged this session`,
+          tone: 'critical',
+        })
+        showBrowserNotification({
+          title: 'Sentinel — Critical flag',
+          body: `${agentLabel}: ${flag.description || flag.flag_type}`,
+          tag: flag.id,
+          onClick: () => navigate(`/flags?session=${flag.session_id}`),
+        })
+      }
+      prevFlagIdsRef.current = new Set(openFlags.map((f) => f.id))
     } catch (error) {
-      setFlagsError(error.message)
+      if (error instanceof RateLimitError) {
+        rateLimitUntilRef.current = Date.now() + error.retryAfter * 1000
+        pollIntervalMsRef.current = Math.max(pollIntervalMsRef.current, error.retryAfter * 1000)
+        setFlagsError(`Rate limited (${error.limitType || 'refresh'}). Retrying in ${error.retryAfter}s.`)
+      } else {
+        setFlagsError(error.message)
+      }
     } finally {
       setFlagsLoading(false)
     }
-  }, [])
+  }, [navigate, pushToast])
 
-  const handleGenerateAudit = useCallback(async () => {
-    if (!selectedSessionId) return
+  const handleGenerateAudit = useCallback(() => {
+    if (!selectedSessionId || auditState.status === 'running') return
+    const session = sessions.find((s) => s.id === selectedSessionId)
     setAuditActionState({ loading: true, error: '', message: '' })
-    try {
-      const result = await generateAudit(selectedSessionId)
-      setLatestAuditResult(result)
+    runLiveAudit(
+      selectedSessionId,
+      session?.agent_name,
+      eventCountBySession[selectedSessionId] || 0,
+    )
+  }, [auditState.status, eventCountBySession, runLiveAudit, selectedSessionId, sessions])
+
+  useEffect(() => {
+    if (auditState.status !== 'complete' && auditState.status !== 'error') return
+
+    const syncKey = `${auditState.status}:${auditState.completedAt}:${auditState.verdict}`
+    if (lastAuditSyncRef.current === syncKey) return
+    lastAuditSyncRef.current = syncKey
+
+    if (auditState.status === 'complete' && auditState.verdict) {
+      const agent_scores = Object.fromEntries(
+        Object.entries(auditState.agentResults || {}).map(([key, val]) => [key, val?.score]),
+      )
+      setLatestAuditResult({
+        verdict: auditState.verdict,
+        overall_score: auditState.overallScore,
+        agent_scores,
+        scores: agent_scores,
+        status: 'complete',
+        flag_created: (auditState.flagsRaised || []).length > 0,
+      })
       setAuditActionState({
         loading: false,
         error: '',
-        message: `Verdict: ${result.verdict} | Flag created: ${result.flag_created}`,
+        message: `Verdict: ${auditState.verdict} | Audit complete`,
       })
-      await Promise.all([loadSessionDetails(selectedSessionId), loadFlagsData()])
-    } catch (error) {
-      setAuditActionState({ loading: false, error: error.message, message: '' })
+      loadSessionDetails(selectedSessionId)
+      loadFlagsData()
+      if (auditState.verdict === 'CRITICAL' || auditState.verdict === 'FLAGGED') {
+        const session = sessions.find((s) => s.id === selectedSessionId)
+        pushToast({
+          title: `Audit ${auditState.verdict}`,
+          message: `${session?.agent_name || 'Session'} scored ${auditState.overallScore ?? '—'}/100`,
+          tone: auditState.verdict === 'CRITICAL' ? 'critical' : 'warning',
+        })
+      }
     }
-  }, [loadFlagsData, loadSessionDetails, selectedSessionId])
+
+    if (auditState.status === 'error') {
+      setAuditActionState({
+        loading: false,
+        error: auditState.error || 'Audit failed',
+        message: '',
+      })
+    }
+  }, [
+    auditState.status,
+    auditState.verdict,
+    auditState.overallScore,
+    auditState.agentResults,
+    auditState.flagsRaised,
+    auditState.error,
+    loadFlagsData,
+    loadSessionDetails,
+    selectedSessionId,
+    sessions,
+    pushToast,
+  ])
 
   const handleFetchReport = useCallback(async () => {
     if (!selectedSessionId) return
@@ -240,22 +403,55 @@ function App() {
     return () => {
       isMountedRef.current = false
     }
-  }, [loadFlagsData, loadSessions])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only bootstrap
+  }, [])
 
   useEffect(() => {
-    if (refreshPollingRef.current) clearInterval(refreshPollingRef.current)
-    refreshPollingRef.current = setInterval(() => {
-      if (!isMountedRef.current) return
+    const onDataCleared = () => {
+      auditEventSource?.close()
+      setAuditEventSource(null)
+      setAuditState(initialLiveAuditState)
+      setLatestAuditResult(null)
+      setReport(null)
+      setAllFlags([])
+      setFlagCountBySession({})
       loadSessions()
       loadFlagsData()
-    }, 10000)
+    }
+    window.addEventListener(DATA_CLEARED_EVENT, onDataCleared)
+    return () => window.removeEventListener(DATA_CLEARED_EVENT, onDataCleared)
+  }, [auditEventSource, loadFlagsData, loadSessions, setAuditEventSource])
+
+  useEffect(() => {
+    const schedulePoll = () => {
+      if (refreshPollingRef.current) clearTimeout(refreshPollingRef.current)
+      const now = Date.now()
+      const waitMs = Math.max(
+        pollIntervalMsRef.current,
+        Math.max(0, rateLimitUntilRef.current - now),
+      )
+      refreshPollingRef.current = setTimeout(async () => {
+        if (!isMountedRef.current) return
+        if (Date.now() < rateLimitUntilRef.current) {
+          schedulePoll()
+          return
+        }
+        await Promise.all([loadSessions(), loadFlagsData()])
+        if (Date.now() >= rateLimitUntilRef.current && pollIntervalMsRef.current > POLL_INTERVAL_MS) {
+          pollIntervalMsRef.current = Math.max(POLL_INTERVAL_MS, Math.floor(pollIntervalMsRef.current * 0.75))
+        }
+        schedulePoll()
+      }, waitMs)
+    }
+    schedulePoll()
     return () => {
       if (refreshPollingRef.current) {
-        clearInterval(refreshPollingRef.current)
+        clearTimeout(refreshPollingRef.current)
         refreshPollingRef.current = null
       }
     }
-  }, [loadFlagsData, loadSessions])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- stable polling loop
+  }, [])
 
   useEffect(() => {
     if (selectedSessionId) {
@@ -280,8 +476,9 @@ function App() {
     if (healthPollingRef.current) clearInterval(healthPollingRef.current)
     healthPollingRef.current = setInterval(() => {
       if (!isMountedRef.current) return
+      if (Date.now() < rateLimitUntilRef.current) return
       check()
-    }, 10000)
+    }, 20000)
     return () => {
       if (healthPollingRef.current) {
         clearInterval(healthPollingRef.current)
@@ -291,14 +488,24 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!selectedSessionId || location.pathname !== '/session') return undefined
+    const match = location.pathname.match(/^\/sessions\/([^/]+)/)
+    if (match?.[1] && match[1] !== selectedSessionId) {
+      setSelectedSessionId(match[1])
+    }
+  }, [location.pathname, selectedSessionId])
 
-    loadSessionDetails(selectedSessionId)
+  useEffect(() => {
+    if (!detailSessionId) return undefined
+    const onDetailPage =
+      location.pathname === '/session' || location.pathname.startsWith('/sessions/')
+    if (!onDetailPage) return undefined
+
+    loadSessionDetails(detailSessionId)
 
     let source
     let cancelled = false
     try {
-      source = new EventSource(`${apiBase}/stream/${selectedSessionId}`)
+      source = new EventSource(`${apiBase}/stream/${detailSessionId}`)
       source.onmessage = (event) => {
         if (cancelled || !isMountedRef.current) return
         try {
@@ -308,7 +515,7 @@ function App() {
           setEvents((prev) => {
             if (prev.some((item) => item.id === newEvent.id)) return prev
             const next = [...prev, newEvent]
-            setEventCountBySession((counts) => ({ ...counts, [selectedSessionId]: next.length }))
+            setEventCountBySession((counts) => ({ ...counts, [detailSessionId]: next.length }))
             return next
           })
         } catch {
@@ -320,17 +527,19 @@ function App() {
         if (detailFallbackRef.current) clearInterval(detailFallbackRef.current)
         detailFallbackRef.current = setInterval(() => {
           if (!isMountedRef.current) return
-          loadSessionDetails(selectedSessionId)
+          if (Date.now() < rateLimitUntilRef.current) return
+          loadSessionDetails(detailSessionId)
           loadFlagsData()
-        }, 10000)
+        }, 30000)
       }
     } catch {
       if (detailFallbackRef.current) clearInterval(detailFallbackRef.current)
       detailFallbackRef.current = setInterval(() => {
         if (!isMountedRef.current) return
-        loadSessionDetails(selectedSessionId)
+        if (Date.now() < rateLimitUntilRef.current) return
+        loadSessionDetails(detailSessionId)
         loadFlagsData()
-      }, 10000)
+      }, 30000)
     }
 
     return () => {
@@ -341,16 +550,18 @@ function App() {
       }
       if (source) source.close()
     }
-  }, [apiBase, loadFlagsData, loadSessionDetails, location.pathname, selectedSessionId])
+  }, [apiBase, detailSessionId, loadFlagsData, loadSessionDetails, location.pathname])
 
-  const showRightPanel = location.pathname === '/session'
+  const showRightPanel =
+    location.pathname === '/session' ||
+    (location.pathname.startsWith('/sessions/') && location.pathname !== '/sessions')
 
   return (
     <Layout
       showRightPanel={showRightPanel}
       rightPanel={
         <SessionAuditPanel
-          selectedSessionId={selectedSessionId}
+          selectedSessionId={detailSessionId || selectedSessionId}
           latestAuditResult={latestAuditResult}
           onGenerateAudit={handleGenerateAudit}
         />
@@ -362,6 +573,33 @@ function App() {
     >
       <Routes>
         <Route
+          path="/sessions"
+          element={
+            <SessionsPage
+              sessions={sessions}
+              sessionsLoading={sessionsLoading}
+              sessionsError={sessionsError}
+              allFlags={allFlags}
+              selectedSessionId={selectedSessionId}
+              eventCountBySession={eventCountBySession}
+              eventsTodayBySession={eventsTodayBySession}
+              lastEventAtBySession={lastEventAtBySession}
+              flagCountBySession={flagCountBySession}
+              onRefresh={loadSessions}
+              onSelectSession={setSelectedSessionId}
+            />
+          }
+        />
+        <Route
+          path="/sessions/:sessionId"
+          element={
+            <SessionDetailRoute
+              onSelectSession={setSelectedSessionId}
+              onGenerateAudit={handleGenerateAudit}
+            />
+          }
+        />
+        <Route
           path="/"
           element={
             <SessionsPage
@@ -369,7 +607,6 @@ function App() {
               sessionsLoading={sessionsLoading}
               sessionsError={sessionsError}
               allFlags={allFlags}
-              isLive={isConnected}
               selectedSessionId={selectedSessionId}
               eventCountBySession={eventCountBySession}
               eventsTodayBySession={eventsTodayBySession}
@@ -421,7 +658,10 @@ function App() {
           element={
             <AuditPage
               selectedSessionId={selectedSessionId}
-              auditState={auditActionState}
+              sessions={sessions}
+              allFlags={allFlags}
+              auditActionState={auditActionState}
+              liveAuditState={auditState}
               reportState={reportState}
               report={report}
               latestAuditResult={latestAuditResult}
@@ -433,15 +673,16 @@ function App() {
         <Route path="/about" element={<About />} />
         <Route
           path="/settings"
-          element={
-            <div className="surface-card empty-state">
-              <div className="empty-symbol">◎</div>
-              <p>Settings panel coming soon.</p>
-            </div>
-          }
+          element={<Settings />}
         />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      <OnboardingWizard
+        open={showOnboarding}
+        sessionsCount={sessions.length}
+        onComplete={() => setShowOnboarding(false)}
+      />
+      <ToastStack toasts={toasts} onDismiss={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))} />
       {auditState.status === 'running' ? (
         <div
           style={{

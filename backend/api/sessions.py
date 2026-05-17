@@ -1,8 +1,9 @@
 from fastapi import APIRouter, HTTPException
 
 from models.event import CapturedEventCreateRequest, CapturedEventResponse
-from models.session import SessionCreateRequest, SessionResponse
+from models.session import SessionCreateRequest, SessionDetailResponse, SessionResponse
 from services import repository
+from services.costs import calculate_cost
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -29,12 +30,14 @@ async def list_sessions() -> list[SessionResponse]:
     return [SessionResponse(**r) for r in rows]
 
 
-@router.get("/{session_id}", response_model=SessionResponse)
-async def get_session(session_id: str) -> SessionResponse:
+@router.get("/{session_id}", response_model=SessionDetailResponse)
+async def get_session(session_id: str) -> SessionDetailResponse:
     row = repository.get_session(session_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    return SessionResponse(**row)
+    events = repository.list_events_for_session(session_id)
+    event_costs = [float(e.get("cost_usd", 0.0) or 0.0) for e in events]
+    return SessionDetailResponse(**row, event_costs=event_costs)
 
 
 @router.post("/{session_id}/events", response_model=CapturedEventResponse)
@@ -53,6 +56,11 @@ async def create_session_event(
         model=payload.model,
         input_tokens=payload.input_tokens,
         output_tokens=payload.output_tokens,
+        cost_usd=calculate_cost(
+            payload.model or "default",
+            payload.input_tokens or 0,
+            payload.output_tokens or 0,
+        ),
         latency_ms=payload.latency_ms,
         timestamp=payload.timestamp,
         raw_json=payload.raw_json,
@@ -67,6 +75,12 @@ async def list_session_events(session_id: str) -> list[CapturedEventResponse]:
         raise HTTPException(status_code=404, detail="Session not found")
     rows = repository.list_events_for_session(session_id)
     return [CapturedEventResponse(**r) for r in rows]
+
+
+@router.delete("")
+async def clear_all_sessions() -> dict:
+    repository.clear_all_data()
+    return {"cleared": True}
 
 
 def session_exists(session_id: str) -> bool:

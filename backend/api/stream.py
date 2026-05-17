@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, HTTPException
@@ -12,6 +13,7 @@ router = APIRouter(prefix="/stream", tags=["stream"])
 
 async def _event_generator(session_id: str) -> AsyncGenerator[str, None]:
     cursor = 0
+    last_meaningful_event_at = time.monotonic()
 
     # Initial event so clients know stream connected.
     yield f"data: {json.dumps({'type': 'session_start', 'session_id': session_id})}\n\n"
@@ -21,6 +23,8 @@ async def _event_generator(session_id: str) -> AsyncGenerator[str, None]:
 
         while cursor < len(events):
             event = events[cursor]
+            raw_json = event.raw_json if isinstance(event.raw_json, dict) else {}
+            event_type = str(raw_json.get("type", "")).lower()
             payload = {
                 "type": "event_captured",
                 "session_id": session_id,
@@ -30,7 +34,20 @@ async def _event_generator(session_id: str) -> AsyncGenerator[str, None]:
             yield f"data: {json.dumps(payload, default=str)}\n\n"
             cursor += 1
 
-        # Heartbeat keeps SSE alive.
+            if str(getattr(event, "model", "")).lower() != "http-middleware":
+                last_meaningful_event_at = time.monotonic()
+
+            # Emit terminal complete signal as soon as verdict/complete is observed.
+            if event_type in {"verdict", "complete"}:
+                yield "event: complete\ndata: " + json.dumps({"status": "complete"}) + "\n\n"
+                return
+
+        # Close stream after prolonged inactivity so clients receive completion.
+        if time.monotonic() - last_meaningful_event_at >= 30:
+            yield "event: complete\ndata: " + json.dumps({"status": "complete"}) + "\n\n"
+            return
+
+        # Heartbeat keeps SSE alive while audit is still active.
         yield f"data: {json.dumps({'type': 'heartbeat', 'session_id': session_id})}\n\n"
         await asyncio.sleep(2)
 

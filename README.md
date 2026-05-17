@@ -1,4 +1,4 @@
-# AI-Agent-Auditor
+# Sentinel
 
 [![CI](https://img.shields.io/github/actions/workflow/status/Ramlols2604/AI-Agent-Auditor/ci.yml?branch=main&label=CI)](https://github.com/Ramlols2604/AI-Agent-Auditor/actions)
 ![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)
@@ -6,11 +6,11 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.1+-009688?logo=fastapi&logoColor=white)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-AI-Agent-Auditor is a full-stack observability and compliance platform for LLM-powered applications. It captures agent activity, runs audit evaluations, and provides a dashboard to investigate and resolve risk signals.
+**Sentinel** is a full-stack LLM behavioral intelligence platform. It captures agent activity, runs audit evaluations, and provides a dashboard to investigate and resolve risk signals.
 
 ## Introduction
 
-As teams move AI agents from prototype to production, governance and traceability become non-negotiable. AI-Agent-Auditor addresses this by combining:
+As teams move AI agents from prototype to production, governance and traceability become non-negotiable. Sentinel addresses this by combining:
 
 - a FastAPI backend for session/event capture and audit workflows
 - a React dashboard for operational visibility
@@ -55,6 +55,8 @@ LLM App / SDK Wrapper / Middleware
 ## Screenshots / Demo
 
 _Add screenshots or a short demo GIF here._
+
+> **Note:** A floating red PDF icon in the bottom-right corner (often visible on About or Settings) comes from the **Adobe Acrobat browser extension**, not from Sentinel. The app does not inject PDF viewers, embeds, or fixed PDF controls on those pages.
 
 - `docs/screenshots/dashboard-overview.png`
 - `docs/screenshots/session-detail.png`

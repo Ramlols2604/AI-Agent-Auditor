@@ -8,6 +8,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
 from services import repository
+from services.costs import estimate_tokens
 
 
 class AuditCaptureMiddleware(BaseHTTPMiddleware):
@@ -56,16 +57,18 @@ class AuditCaptureMiddleware(BaseHTTPMiddleware):
         try:
             session_id = self._ensure_session()
             if session_id:
+                prompt = f"{request.method} {request.url.path}"
+                response_text = f"status={response.status_code}"
                 repository.create_event(
                     {
                         "id": str(uuid.uuid4()),
                         "session_id": session_id,
                         "sequence_num": self._next_sequence(),
-                        "prompt": f"{request.method} {request.url.path}",
-                        "response": f"status={response.status_code}",
-                        "model": "http-middleware",
-                        "input_tokens": 0,
-                        "output_tokens": 0,
+                        "prompt": prompt,
+                        "response": response_text,
+                        "model": "http-request",
+                        "input_tokens": estimate_tokens(prompt),
+                        "output_tokens": estimate_tokens(response_text),
                         "latency_ms": latency_ms,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                         "raw_json": {

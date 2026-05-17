@@ -5,3 +5,6 @@ pydantic>=2
 python-dotenv
 pytest
 httpx
+datasets>=2.14.0
+huggingface_hub>=0.20.0
+redis>=5.0.0

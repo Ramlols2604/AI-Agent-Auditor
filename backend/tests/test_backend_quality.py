@@ -10,6 +10,7 @@ from api.health import router as health_router
 from api.sessions import router as sessions_router
 from sdk.middleware import AuditCaptureMiddleware
 from services import repository
+from services.costs import calculate_cost
 
 
 @pytest.fixture()
@@ -94,6 +95,41 @@ def test_report_contract_is_json_summary(client: TestClient) -> None:
     assert payload["status"] == "ready"
     assert "summary" in payload
     assert "flags_total" in payload["summary"]
+
+
+def test_event_ingest_calculates_and_stores_cost(client: TestClient) -> None:
+    session_resp = client.post(
+        "/sessions",
+        json={"agent_name": "cost-check", "model_used": "gpt-4o"},
+    )
+    assert session_resp.status_code == 200
+    session_id = session_resp.json()["id"]
+
+    expected = calculate_cost("gpt-4o", 100, 50)
+    event_resp = client.post(
+        f"/sessions/{session_id}/events",
+        json={
+            "sequence_num": 1,
+            "prompt": "hello",
+            "response": "world",
+            "model": "gpt-4o",
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "latency_ms": 12,
+            "raw_json": {},
+        },
+    )
+    assert event_resp.status_code == 200
+    assert event_resp.json()["cost_usd"] == expected
+
+    session_row = repository.get_session(session_id)
+    assert session_row is not None
+    assert session_row["total_cost_usd"] == expected
+
+    list_resp = client.get("/sessions")
+    assert list_resp.status_code == 200
+    listed = next(s for s in list_resp.json() if s["id"] == session_id)
+    assert listed["total_cost_usd"] == expected
 
 
 def test_middleware_creates_capture_session_and_events(client: TestClient) -> None:

@@ -781,41 +781,11 @@ button:disabled,
 .about-page {
   max-width: 1100px;
   margin: 0 auto;
+  padding: 0 var(--s-7, 28px);
 }
 
 .about-section {
-  padding: 80px 0;
-}
-
-.about-section.hero {
-  text-align: center;
-}
-
-.about-hero-title {
-  margin: 0;
-  font-size: 40px;
-  font-weight: 500;
-  color: var(--text);
-}
-
-.about-hero-subtitle {
-  margin-top: 12px;
-  font-size: 15px;
-  line-height: 1.8;
-  color: #94a3b8;
-}
-
-.about-pill-row {
-  margin-top: 16px;
-  display: flex;
-  justify-content: center;
-  gap: 10px;
-}
-
-.about-rule {
-  margin-top: 28px;
-  border: 0;
-  border-top: 1px solid var(--border);
+  padding: 48px 0;
 }
 
 .about-title {

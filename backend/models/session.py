@@ -22,6 +22,11 @@ class SessionResponse(BaseModel):
     ended_at: datetime | None = None
     total_tokens: int = Field(default=0, ge=0)
     total_cost_usd: float = Field(default=0.0, ge=0.0)
+    event_count: int = Field(default=0, ge=0)
     flag_count: int = Field(default=0, ge=0)
     compliance_score: float | None = Field(default=None, ge=0.0, le=100.0)
     status: SessionStatus = "active"
+
+
+class SessionDetailResponse(SessionResponse):
+    event_costs: list[float] = Field(default_factory=list)

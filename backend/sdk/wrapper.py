@@ -144,7 +144,7 @@ class AuditWrapper:
     def _create_completion(self, *args: Any, **kwargs: Any) -> Any:
         start = time.perf_counter()
 
-        # call wrapped client first; never block host behavior on auditor failures
+        # call wrapped client first; never block host behavior on Sentinel capture failures
         response = self._wrapped.chat.completions.create(*args, **kwargs)
 
         latency_ms = int((time.perf_counter() - start) * 1000)
