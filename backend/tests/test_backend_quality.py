@@ -84,6 +84,20 @@ def test_audit_flow_and_resolve_persistence(client: TestClient) -> None:
     assert any(f["id"] == flag_id and f["resolved"] is True for f in flags)
 
 
+def test_repeated_audit_does_not_duplicate_open_flags(client: TestClient) -> None:
+    session_id = _create_session_and_event(client, risky=True)
+
+    first = client.post("/audit/generate", json={"session_id": session_id})
+    assert first.status_code == 200
+    second = client.post("/audit/generate", json={"session_id": session_id})
+    assert second.status_code == 200
+
+    flags = repository.list_flags_for_session(session_id)
+    open_flags = [f for f in flags if not f["resolved"]]
+    types = {f["flag_type"] for f in open_flags}
+    assert len(open_flags) == len(types)
+
+
 def test_report_contract_is_json_summary(client: TestClient) -> None:
     session_id = _create_session_and_event(client)
     client.post("/audit/generate", json={"session_id": session_id})

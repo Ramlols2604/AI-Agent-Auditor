@@ -4,7 +4,6 @@ from services.costs import calculate_cost
 from services.flag_builder import (
     DEFAULT_RESOLUTION_STEPS,
     EU_ARTICLES,
-    agent_verdict_payload,
     verdict_from_score,
     severity_from_score,
 )
@@ -93,61 +92,6 @@ def _build_agent_result(
         "eu_ai_act_article": EU_ARTICLES.get(agent_type, "Article 9 — Risk management"),
         "estimated_fix_time": fix_time or _estimate_fix_time(score),
     }
-
-
-def _flag_severity_for_score(score: float) -> str:
-    if score < 40:
-        return "critical"
-    if score < 60:
-        return "high"
-    return "medium"
-
-
-def _flag_description(agent_name: str, result: dict) -> str:
-    findings = result.get("findings")
-    first_finding = findings[0] if isinstance(findings, list) and findings else None
-    return (
-        result.get("summary")
-        or result.get("claim")
-        or first_finding
-        or f"{agent_name} score {result.get('score')} below threshold {THRESHOLDS.get(agent_name, 70)}"
-    )
-
-
-def _create_flags_from_agent_results(session_id: str, agent_results: dict[str, dict]) -> list[str]:
-    """Persist flags for any agent score below its threshold."""
-    events = repository.list_events_for_session(session_id)
-    latest_event_id = events[-1]["id"] if events else "no-event"
-    flag_ids: list[str] = []
-
-    for agent_name, result in agent_results.items():
-        if agent_name not in THRESHOLDS or not isinstance(result, dict):
-            continue
-        score = float(result.get("score", 100))
-        threshold = THRESHOLDS[agent_name]
-        if score >= threshold:
-            continue
-
-        severity = _flag_severity_for_score(score)
-        description = _flag_description(agent_name, result)
-        flag = repository.create_flag(
-            event_id=latest_event_id,
-            session_id=session_id,
-            flag_type=agent_name,
-            severity=severity,
-            description=description,
-            agent_verdict=agent_verdict_payload(result),
-        )
-        flag_ids.append(flag["id"])
-        logger.info(
-            "Created %s flag for session %s (score=%s, threshold=%s)",
-            agent_name,
-            session_id,
-            score,
-            threshold,
-        )
-
-    return flag_ids
 
 
 def _build_agent_results_from_metrics(
@@ -344,27 +288,6 @@ async def generate_audit_result(session_id: str) -> dict:
         total_cost=total_cost,
     )
 
-    events_for_flags = repository.list_events_for_session(session_id)
-    latest_event_id = events_for_flags[-1]["id"] if events_for_flags else "no-event"
-
-    flag_ids = _create_flags_from_agent_results(session_id, agent_results)
-    if not flag_ids and verdict in {"FLAGGED", "CRITICAL"}:
-        worst_name = min(
-            THRESHOLDS.keys(),
-            key=lambda name: float((agent_results.get(name) or {}).get("score", 100)),
-        )
-        worst = dict(agent_results.get(worst_name) or {})
-        score = float(worst.get("score", 0))
-        flag = repository.create_flag(
-            event_id=latest_event_id,
-            session_id=session_id,
-            flag_type=worst_name,
-            severity=_flag_severity_for_score(score),
-            description=_flag_description(worst_name, worst),
-            agent_verdict=agent_verdict_payload(worst),
-        )
-        flag_ids.append(flag["id"])
-
     return {
         "session_id": session_id,
         "scores": scores,
@@ -374,7 +297,4 @@ async def generate_audit_result(session_id: str) -> dict:
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "mode": "heuristic-v1",
         "event_count": event_count,
-        "flag_ids": flag_ids,
-        "flag_created": len(flag_ids) > 0,
-        "flag_id": flag_ids[0] if flag_ids else None,
     }

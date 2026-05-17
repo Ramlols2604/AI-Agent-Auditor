@@ -29,9 +29,7 @@ def _severity_from_score(overall_score: float) -> str:
 
 
 def _apply_flag_side_effects(session_id: str, result: dict[str, Any]) -> dict[str, Any]:
-    flag_ids = result.get("flag_ids")
-    if not flag_ids:
-        flag_ids = create_flags_from_audit(session_id, result)
+    flag_ids = create_flags_from_audit(session_id, result)
     result["flag_created"] = len(flag_ids) > 0
     result["flag_id"] = flag_ids[0] if flag_ids else None
     result["flag_ids"] = flag_ids

@@ -24,6 +24,7 @@ def init_db() -> None:
         _ensure_event_count_column(conn)
         _backfill_event_costs(conn)
         _backfill_session_rollups(conn)
+    dedupe_open_flags()
 
 
 def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
@@ -235,6 +236,70 @@ def clear_all_data() -> None:
         conn.execute("DELETE FROM flags")
         conn.execute("DELETE FROM audit_results")
 
+def get_open_flag(session_id: str, flag_type: str) -> dict | None:
+    with _get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT id, event_id, session_id, flag_type, severity,
+                   description, agent_verdict, resolved, created_at
+            FROM flags
+            WHERE session_id = ? AND flag_type = ? AND COALESCE(resolved, 0) = 0
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (session_id, flag_type),
+        ).fetchone()
+    if not row:
+        return None
+    item = dict(row)
+    item["agent_verdict"] = json.loads(item["agent_verdict"]) if item["agent_verdict"] else {}
+    item["resolved"] = bool(item["resolved"])
+    return item
+
+
+def _sync_session_flag_count(conn: sqlite3.Connection, session_id: str) -> None:
+    conn.execute(
+        """
+        UPDATE sessions
+        SET flag_count = (
+            SELECT COUNT(*) FROM flags
+            WHERE session_id = ? AND COALESCE(resolved, 0) = 0
+        )
+        WHERE id = ?
+        """,
+        (session_id, session_id),
+    )
+
+
+def dedupe_open_flags() -> int:
+    """Remove duplicate open flags per session+type, keeping the newest row."""
+    removed = 0
+    with _get_conn() as conn:
+        dup_groups = conn.execute(
+            """
+            SELECT session_id, flag_type
+            FROM flags
+            WHERE COALESCE(resolved, 0) = 0
+            GROUP BY session_id, flag_type
+            HAVING COUNT(*) > 1
+            """
+        ).fetchall()
+        for group in dup_groups:
+            rows = conn.execute(
+                """
+                SELECT id FROM flags
+                WHERE session_id = ? AND flag_type = ? AND COALESCE(resolved, 0) = 0
+                ORDER BY created_at DESC
+                """,
+                (group["session_id"], group["flag_type"]),
+            ).fetchall()
+            for stale in rows[1:]:
+                conn.execute("DELETE FROM flags WHERE id = ?", (stale["id"],))
+                removed += 1
+            _sync_session_flag_count(conn, group["session_id"])
+    return removed
+
+
 def create_flag(
     event_id: str,
     session_id: str,
@@ -243,6 +308,20 @@ def create_flag(
     description: str,
     agent_verdict: dict | None = None,
 ) -> dict:
+    existing = get_open_flag(session_id, flag_type)
+    verdict_json = json.dumps(agent_verdict or {})
+    if existing is not None:
+        with _get_conn() as conn:
+            conn.execute(
+                """
+                UPDATE flags
+                SET event_id = ?, severity = ?, description = ?, agent_verdict = ?
+                WHERE id = ?
+                """,
+                (event_id, severity, description, verdict_json, existing["id"]),
+            )
+        return get_flag(existing["id"])
+
     flag_id = str(uuid.uuid4())
     created_at = datetime.now(timezone.utc).isoformat()
     with _get_conn() as conn:
@@ -261,19 +340,12 @@ def create_flag(
                 flag_type,
                 severity,
                 description,
-                json.dumps(agent_verdict or {}),
+                verdict_json,
                 0,
                 created_at,
             ),
         )
-        conn.execute(
-            """
-            UPDATE sessions
-            SET flag_count = COALESCE(flag_count, 0) + 1
-            WHERE id = ?
-            """,
-            (session_id,),
-        )
+        _sync_session_flag_count(conn, session_id)
     return get_flag(flag_id)
 
 
