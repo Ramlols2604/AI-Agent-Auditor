@@ -10,6 +10,17 @@ from starlette.requests import Request
 from services import repository
 from services.costs import estimate_tokens
 
+# Do not record dashboard polling as agent sessions (prevents thousands of noise rows).
+_SKIP_CAPTURE_PREFIXES = (
+    "/health",
+    "/flags",
+    "/sessions",
+    "/audit/live",
+    "/docs",
+    "/openapi",
+    "/redoc",
+)
+
 
 class AuditCaptureMiddleware(BaseHTTPMiddleware):
     """
@@ -49,10 +60,19 @@ class AuditCaptureMiddleware(BaseHTTPMiddleware):
             self._session_id = created.get("id") if created else None
             return self._session_id
 
+    def _should_capture(self, request: Request) -> bool:
+        path = request.url.path or ""
+        if request.method != "GET":
+            return True
+        return not any(path == prefix or path.startswith(f"{prefix}/") for prefix in _SKIP_CAPTURE_PREFIXES)
+
     async def dispatch(self, request: Request, call_next):
         started = time.perf_counter()
         response = await call_next(request)
         latency_ms = int((time.perf_counter() - started) * 1000)
+
+        if not self._should_capture(request):
+            return response
 
         try:
             session_id = self._ensure_session()

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { getApiBase } from './api/client'
-import { ONBOARDING_KEY } from './pages/OnboardingWizard'
+import { ONBOARDING_KEY } from './utils/onboarding'
 import {
   notificationsEnabled,
   requestNotificationPermission,
@@ -91,18 +91,9 @@ export default function Settings() {
     }
   }
 
-  const saveThresholds = async () => {
+  const saveThresholds = () => {
     window.localStorage.setItem(STORAGE_KEYS.thresholds, JSON.stringify(thresholds))
-    try {
-      await fetch(`${getApiBase()}/settings/thresholds`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(thresholds),
-      })
-    } catch {
-      // local persistence is still valid if backend endpoint is unavailable
-    }
-    setNotice('Thresholds saved.')
+    setNotice('Thresholds saved locally.')
   }
 
   const saveCostAlerts = () => {

@@ -11,7 +11,8 @@ import AuditPage from './pages/AuditPage'
 import FlagsPage from './pages/FlagsPage'
 import SessionDetailRoute from './pages/SessionDetailRoute'
 import SessionsPage from './pages/SessionsPage'
-import OnboardingWizard, { isOnboardingComplete } from './pages/OnboardingWizard'
+import OnboardingWizard from './pages/OnboardingWizard'
+import { isOnboardingComplete } from './utils/onboarding'
 import ToastStack from './components/ToastStack'
 import LiveAudit from './LiveAudit'
 import Settings from './Settings'
@@ -106,7 +107,6 @@ function App() {
   }, [])
 
   const { runAudit: runLiveAudit } = useAuditRunner({
-    auditState,
     setAuditState,
     setAuditEventSource,
   })
@@ -325,6 +325,8 @@ function App() {
     auditState.agentResults,
     auditState.flagsRaised,
     auditState.error,
+    auditState.completedAt,
+    auditState.sessionId,
     loadFlagsData,
     loadSessions,
     pushToast,
@@ -510,7 +512,6 @@ function App() {
             <LiveAudit
               auditState={auditState}
               setAuditState={setAuditState}
-              auditEventSource={auditEventSource}
               setAuditEventSource={setAuditEventSource}
             />
           }

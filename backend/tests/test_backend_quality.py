@@ -133,12 +133,28 @@ def test_event_ingest_calculates_and_stores_cost(client: TestClient) -> None:
 
 
 def test_middleware_creates_capture_session_and_events(client: TestClient) -> None:
-    # Trigger middleware capture on regular API calls.
-    health_resp = client.get("/health")
-    assert health_resp.status_code == 200
-    client.get("/health")
+    # Middleware captures mutating API calls, not dashboard GET polling.
+    session_resp = client.post(
+        "/sessions",
+        json={"agent_name": "middleware-capture-test", "model_used": "http-request"},
+    )
+    assert session_resp.status_code == 200
+    session_id = session_resp.json()["id"]
+    client.post(
+        f"/sessions/{session_id}/events",
+        json={
+            "sequence_num": 1,
+            "prompt": "hello",
+            "response": "world",
+            "model": "gpt-4o",
+            "input_tokens": 2,
+            "output_tokens": 3,
+            "latency_ms": 10,
+            "raw_json": {},
+        },
+    )
 
-    sessions = repository.list_sessions()
+    sessions = repository.list_sessions(exclude_noise=False)
     middleware_sessions = [s for s in sessions if s["agent_name"] == "middleware-capture"]
     assert middleware_sessions
 

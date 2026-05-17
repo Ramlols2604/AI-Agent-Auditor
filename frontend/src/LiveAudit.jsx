@@ -74,7 +74,7 @@ function verdictStyle(verdict) {
   }
 }
 
-export default function LiveAudit({ auditState, setAuditState, auditEventSource, setAuditEventSource }) {
+export default function LiveAudit({ auditState, setAuditState, setAuditEventSource }) {
   const location = useLocation()
   const [sessions, setSessions] = useState([])
   const [sessionsLoading, setSessionsLoading] = useState(false)
@@ -86,7 +86,6 @@ export default function LiveAudit({ auditState, setAuditState, auditEventSource,
   const didInitialSessionPickRef = useRef(false)
 
   const { runAudit: startAudit, closeStream } = useAuditRunner({
-    auditState,
     setAuditState,
     setAuditEventSource,
   })

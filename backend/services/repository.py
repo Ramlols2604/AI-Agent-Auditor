@@ -92,6 +92,15 @@ def _backfill_session_rollups(conn: sqlite3.Connection) -> None:
         ), 0.0)
         """
     )
+    conn.execute(
+        """
+        UPDATE sessions
+        SET flag_count = COALESCE((
+            SELECT COUNT(*) FROM flags
+            WHERE flags.session_id = sessions.id AND COALESCE(flags.resolved, 0) = 0
+        ), 0)
+        """
+    )
 
 
 def create_session(agent_name: str, model_used: str | None, session_id: str, started_at: str, status: str) -> dict:
@@ -106,16 +115,32 @@ def create_session(agent_name: str, model_used: str | None, session_id: str, sta
     return get_session(session_id)
 
 
-def list_sessions() -> list[dict]:
+NOISE_AGENT_NAMES = ("middleware-capture",)
+
+
+def list_sessions(*, exclude_noise: bool = True) -> list[dict]:
     with _get_conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT id, agent_name, model_used, started_at, ended_at,
-                   total_tokens, total_cost_usd, event_count, flag_count, compliance_score, status
-            FROM sessions
-            ORDER BY started_at DESC
-            """
-        ).fetchall()
+        if exclude_noise:
+            placeholders = ",".join("?" for _ in NOISE_AGENT_NAMES)
+            rows = conn.execute(
+                f"""
+                SELECT id, agent_name, model_used, started_at, ended_at,
+                       total_tokens, total_cost_usd, event_count, flag_count, compliance_score, status
+                FROM sessions
+                WHERE agent_name NOT IN ({placeholders})
+                ORDER BY started_at DESC
+                """,
+                NOISE_AGENT_NAMES,
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT id, agent_name, model_used, started_at, ended_at,
+                       total_tokens, total_cost_usd, event_count, flag_count, compliance_score, status
+                FROM sessions
+                ORDER BY started_at DESC
+                """
+            ).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -314,11 +339,24 @@ def list_flags_for_session(session_id: str) -> list[dict]:
 
 
 def resolve_flag(flag_id: str, resolved: bool) -> dict | None:
+    existing = get_flag(flag_id)
+    if existing is None:
+        return None
+    session_id = existing["session_id"]
     with _get_conn() as conn:
-        cursor = conn.execute(
+        conn.execute(
             "UPDATE flags SET resolved = ? WHERE id = ?",
             (1 if resolved else 0, flag_id),
         )
-        if cursor.rowcount == 0:
-            return None
+        conn.execute(
+            """
+            UPDATE sessions
+            SET flag_count = (
+                SELECT COUNT(*) FROM flags
+                WHERE session_id = ? AND COALESCE(resolved, 0) = 0
+            )
+            WHERE id = ?
+            """,
+            (session_id, session_id),
+        )
     return get_flag(flag_id)

@@ -1,4 +1,6 @@
 import { useMemo, useState } from 'react'
+
+const DAY_MS = 24 * 60 * 60 * 1000
 import { useNavigate } from 'react-router-dom'
 import { Btn, FilterTabs } from '../design/AppShell.jsx'
 import { Icon } from '../design/icons.jsx'
@@ -118,15 +120,16 @@ export default function SessionsPage({
   )
 
   const activeCount = counts.active
+  const [spendAnchorMs] = useState(() => Date.now())
   const spendToday = useMemo(
     () =>
       sessions
         .filter((s) => {
           const ts = new Date(s.started_at || '').getTime()
-          return Number.isFinite(ts) && Date.now() - ts <= 24 * 60 * 60 * 1000
+          return Number.isFinite(ts) && spendAnchorMs - ts <= DAY_MS
         })
         .reduce((sum, s) => sum + Number(s.total_cost_usd || 0), 0),
-    [sessions],
+    [sessions, spendAnchorMs],
   )
   const eventsToday = useMemo(() => {
     const fromProbes = Object.values(eventsTodayBySession).reduce((a, n) => a + n, 0)
@@ -135,9 +138,10 @@ export default function SessionsPage({
   }, [eventsTodayBySession, sessions])
 
   const sessionCount = sessions.length
-  const healthScore = sessionCount
-    ? Math.round(((sessionCount - counts.flagged) / sessionCount) * 100)
-    : 100
+  const healthScore =
+    unresolvedFlags.length === 0
+      ? 100
+      : Math.max(0, Math.round(100 - (counts.flagged / Math.max(sessionCount, 1)) * 100))
   const totalCost = spendToday
   const totalEvents = eventsToday
 
@@ -226,9 +230,9 @@ export default function SessionsPage({
               />
             </div>
             <div style={{ marginTop: '6px', fontSize: '11px', color: '#64748b' }}>
-              {healthScore === 100
+              {unresolvedFlags.length === 0
                 ? 'All agents running clean'
-                : `${100 - healthScore}% of sessions have issues`}
+                : `${counts.flagged} session${counts.flagged === 1 ? '' : 's'} need review`}
             </div>
           </div>
         ),

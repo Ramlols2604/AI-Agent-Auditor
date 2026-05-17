@@ -23,7 +23,7 @@ const AGENT_META = {
   compliance: { label: 'Compliance Agent', color: '#6366f1' },
 }
 
-export function useAuditRunner({ auditState, setAuditState, setAuditEventSource }) {
+export function useAuditRunner({ setAuditState, setAuditEventSource }) {
   const esRef = useRef(null)
 
   const closeStream = useCallback(() => {

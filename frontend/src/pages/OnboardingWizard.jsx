@@ -3,24 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Btn } from '../design/AppShell.jsx'
 import { getApiBase } from '../api/client'
 import { requestNotificationPermission } from '../utils/notifications'
-
-export const ONBOARDING_KEY = 'sentinel_onboarding_complete'
-
-export function isOnboardingComplete() {
-  try {
-    return localStorage.getItem(ONBOARDING_KEY) === 'true'
-  } catch {
-    return false
-  }
-}
-
-export function markOnboardingComplete() {
-  try {
-    localStorage.setItem(ONBOARDING_KEY, 'true')
-  } catch {
-    /* ignore */
-  }
-}
+import { markOnboardingComplete } from '../utils/onboarding'
 
 const SDK_COMMAND = `cd AI-Agent-Auditor
 pip install -r requirements.txt

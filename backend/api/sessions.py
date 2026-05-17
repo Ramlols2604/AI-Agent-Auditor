@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from models.event import CapturedEventCreateRequest, CapturedEventResponse
 from models.session import SessionCreateRequest, SessionDetailResponse, SessionResponse
@@ -25,8 +25,10 @@ async def create_session(payload: SessionCreateRequest) -> SessionResponse:
 
 
 @router.get("", response_model=list[SessionResponse])
-async def list_sessions() -> list[SessionResponse]:
-    rows = repository.list_sessions()
+async def list_sessions(
+    exclude_noise: bool = Query(default=True, description="Hide middleware-capture noise sessions"),
+) -> list[SessionResponse]:
+    rows = repository.list_sessions(exclude_noise=exclude_noise)
     return [SessionResponse(**r) for r in rows]
 
 
